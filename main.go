@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	//"database/sql"
+	//"strconv"
 
 	"github.com/yhat/scrape"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
-	. "github.com/jaytaylor/html2text"
+	_ "github.com/mattn/go-sqlite3"
+	"strings"
 )
 
 // Set your email here to include in the User-Agent string.
@@ -16,12 +19,13 @@ var email = "youremail@gmail.com"
 var urls = []string{
 	//"http://techcrunch.com/",
 	//"https://www.reddit.com/",
-	"https://en.wikipedia.org/wiki/Main_Page",
-	//"https://news.ycombinator.com/",
-	//"https://www.buzzfeed.com/",
-	"http://digg.com",
+	//"https://en.wikipedia.org",
+	"https://news.ycombinator.com/",
+	"https://www.buzzfeed.com/",
 	"https://dou.ua",
+	"http://digg.com",
 }
+var keyword  = "language"
 
 func respGen(urls ...string) <-chan *http.Response {
 	var wg sync.WaitGroup
@@ -70,44 +74,25 @@ func rootGen(in <-chan *http.Response) <-chan *html.Node {
 	return out
 }
 
-func contentGen(in <-chan *html.Node) <-chan map[string]string {
-	// define a matcher
-	//matcher := func(n *html.Node) bool {
-	//	// must check for nil values
-	//	if n.DataAtom == atom.A && n.Parent != nil && n.Parent.Parent != nil {
-	//		return scrape.Attr(n.Parent.Parent, "class") == "athing"
-	//	}
-	//	return false
-	//}
+func titleGen(in <-chan *html.Node) <-chan string {
 	var wg sync.WaitGroup
-	out := make(chan map[string]string)
+	out := make(chan string)
 	for root := range in {
 		wg.Add(1)
 		go func(root *html.Node) {
-			//my_html, ok := scrape.Find(root, scrape.ByTag(atom.Html))
-			//titles := scrape.FindAllNested(root, matcher)
-			htmls := scrape.FindAllNested(root, scrape.ByTag(atom.Body))
-			for _, my_html := range htmls{
-				//if ok {
-				// out <- scrape.Text(title)
-				text, err := FromString(scrape.Text(my_html), Options{PrettyTables: true})
-				if err != nil {
-					panic(err)
+			// define a matcher
+			matcher := func(n *html.Node) bool {
+				// must check for nil values
+				if n.DataAtom == atom.A && n.Parent != nil && n.Parent.Parent != nil {
+					return scrape.Attr(n.Parent.Parent, "class") == "athing"
 				}
-				content := map[string]string{
-					text : text,
-				}
-				out <- content
+				return false
 			}
-			//for _, my_html := range htmls{
-			//	text, err := FromString(scrape.Text(my_html), Options{PrettyTables: true})
-			//	if err != nil {
-			//		panic(err)
-			//	}
-			//	//out <- scrape.Text(my_html)
-			//	out <- text
-			//}
 
+			titles := scrape.FindAllNested(root, matcher)
+			for _, title := range titles {
+				out <- scrape.Text(title)
+			}
 			wg.Done()
 		}(root)
 	}
@@ -119,15 +104,23 @@ func contentGen(in <-chan *html.Node) <-chan map[string]string {
 }
 
 func main() {
-
-
 	// Set up the pipeline to consume back-to-back output
-	// ending with the final stage to print the content of
-	// each web page in the main go routine.gi
-	for content := range contentGen(rootGen(respGen(urls...))) {
-		fmt.Println(content)
-
+	// ending with the final stage to print the title of
+	// each web page in the main go routine.
+	for title := range titleGen(rootGen(respGen(urls...))) {
+		fmt.Println("Useful for you: ", title, "--->" ,strings.Contains(title, keyword))
+		//database, _ := sql.Open("sqlite3", "./titles.db")
+		//statement, _ := database.Prepare("CREATE TABLE IF NOT EXISTS titles (id INTEGER PRIMARY KEY, title TEXT)")
+		//statement.Exec()
+		//statement, _ = database.Prepare("INSERT INTO titles (title) VALUES (?)")
+		//statement.Exec(title)
+		//rows, _ := database.Query("SELECT id, title FROM titles")
+		//var id int
+		//
+		//for rows.Next() {
+		//	rows.Scan(&id, &title)
+		//	fmt.Println(strconv.Itoa(id) + ": " + title + " ")
+		//}
+		//statement, _ = database.Prepare("DROP TABLE [IF EXISTS] titles")
 	}
-
-
 }
