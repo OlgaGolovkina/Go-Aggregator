@@ -10,6 +10,6 @@ You can choose any keyword due to the term you are interested in.
 You can also set up the depth of your searching process.
 
 TO RUN THE PROGRAM you need :
-go run main.go + http://website.com
+go run main.go + http://....
 
 
