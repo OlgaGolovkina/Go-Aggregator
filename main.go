@@ -3,127 +3,175 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"sync"
-	"database/sql"
-	"strconv"
-
-	"github.com/yhat/scrape"
+	"os"
+	"strings"
+	log "github.com/llimllib/loglevel"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 	_ "github.com/mattn/go-sqlite3"
-	"strings"
+
+	"database/sql"
+	"strconv"
 )
 
-// Set your email here to include in the User-Agent string.
-//var email = "youremail@gmail.com"
-var urls = []string{
-	//"http://techcrunch.com/",
-	//"https://www.reddit.com/",
-	//"https://en.wikipedia.org",
-	"https://news.ycombinator.com/",
-	"https://www.buzzfeed.com/",
-	"https://dou.ua",
-	"http://digg.com",
+type Link struct {
+	url   string
+	text  string
+	depth int
 }
-var keyword  = "Python"
+
+type HttpError struct {
+	original string
+}
+
+var keyword = "Python"
 var id int
 
-func respGen(urls ...string) <-chan *http.Response {
-	var wg sync.WaitGroup
-	out := make(chan *http.Response)
-	wg.Add(len(urls))
-	for _, url := range urls {
-		go func(url string) {
-			req, err := http.NewRequest("GET", url, nil)
-			if err != nil {
-				panic(err)
-			}
-			//req.Header.Set("user-agent", "testBot("+email+")")
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				panic(err)
-			}
-			out <- resp
-			wg.Done()
-		}(url)
+func (l Link) String() string {
+	spacer := strings.Repeat("\t", l.depth)
+	text, url := l.text, l.url
+
+	if strings.Contains(l.text,keyword) {
+
+		database, _ := sql.Open("sqlite3", "./article.db")
+		createDB := "CREATE TABLE IF NOT EXISTS article (id INTEGER PRIMARY KEY, url TEXT, text TEXT)"
+		database.Exec(createDB)
+		tx, _ := database.Begin()
+		statement, _ := database.Prepare("INSERT INTO article (url, text) VALUES (?, ?)")
+		statement.Exec(url, text)
+		tx.Commit()
+		rows, _ := database.Query("SELECT id, url, text FROM article")
+
+		for rows.Next() {
+			rows.Scan(&id, &text, &url)
+		}
+		fmt.Println(strconv.Itoa(id) + ": " + text + ": " + url + " ")
 	}
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
-	return out
+	return fmt.Sprintf("%s%s (%d) - %s", spacer, l.text, l.depth, l.url)
 }
 
-func rootGen(in <-chan *http.Response) <-chan *html.Node {
-	var wg sync.WaitGroup
-	out := make(chan *html.Node)
-	for resp := range in {
-		wg.Add(1)
-		go func(resp *http.Response) {
-			root, err := html.Parse(resp.Body)
-			if err != nil {
-				panic(err)
-			}
-			out <- root
-			wg.Done()
-		}(resp)
+func (l Link) Valid() bool {
+	if l.depth >= MaxDepth {
+		return false
 	}
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
-	return out
+
+	if len(l.text) == 0 {
+		return false
+	}
+	if len(l.url) == 0 || strings.Contains(strings.ToLower(l.url), "javascript") {
+		return false
+	}
+
+	return true
 }
 
-func titleGen(in <-chan *html.Node) <-chan string {
-	var wg sync.WaitGroup
-	out := make(chan string)
-	for root := range in {
-		wg.Add(1)
-		go func(root *html.Node) {
-			// define a matcher
-			matcher := func(n *html.Node) bool {
-				// must check for nil values
-				if n.DataAtom == atom.A && n.Parent != nil && n.Parent.Parent != nil {
-					return scrape.Attr(n.Parent.Parent, "class") == "athing"
+func (httpError HttpError) Error() string {
+	return httpError.original
+}
+
+var MaxDepth = 1
+
+func LinkReader(resp *http.Response, depth int) []Link {
+	page := html.NewTokenizer(resp.Body)
+	links := []Link{}
+
+	var start *html.Token
+	var text string
+
+	for {
+		_ = page.Next()
+		token := page.Token()
+		if token.Type == html.ErrorToken {
+			break
+		}
+
+		if start != nil && token.Type == html.TextToken {
+			text = fmt.Sprintf("%s%s", text, token.Data)
+		}
+
+		if token.DataAtom == atom.A {
+			switch token.Type {
+			case html.StartTagToken:
+				if len(token.Attr) > 0 {
+					start = &token
 				}
-				return false
-			}
+			case html.EndTagToken:
+				if start == nil {
+					log.Warnf("Link End found without Start: %s", text)
+					continue
+				}
+				link := NewLink(*start, text, depth)
+				if link.Valid() {
+					links = append(links, link)
+					log.Debugf("Link Found %v", link)
+				}
 
-			titles := scrape.FindAllNested(root, matcher)
-			for _, title := range titles {
-				out <- scrape.Text(title)
+				start = nil
+				text = " "
 			}
-			wg.Done()
-		}(root)
+		}
 	}
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
-	return out
+
+	log.Debug(links)
+	return links
+}
+
+func NewLink(tag html.Token, text string, depth int) Link {
+	link := Link{text: strings.TrimSpace(text), depth: depth}
+
+	for i := range tag.Attr {
+		if tag.Attr[i].Key == "href" {
+			link.url = strings.TrimSpace(tag.Attr[i].Val)
+		}
+	}
+	return link
+}
+
+func recurDownloader(url string, depth int) {
+	page, err := downloader(url)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	links := LinkReader(page, depth)
+
+	for _, link := range links {
+		if strings.Contains(link.text,keyword) {
+			fmt.Println(link)
+		}
+		if depth+1 < MaxDepth {
+			recurDownloader(link.url, depth+1)
+		}
+	}
+}
+
+func downloader(url string) (resp *http.Response, err error) {
+	log.Debugf("Downloading %s", url)
+	resp, err = http.Get(url)
+	if err != nil {
+		log.Debugf("Error: %s", err)
+		return
+	}
+
+	if resp.StatusCode > 299 {
+		err = HttpError{fmt.Sprintf("Error (%d): %s", resp.StatusCode, url)}
+		log.Debug(err)
+		return
+	}
+	return
+
 }
 
 func main() {
-	// Set up the pipeline to consume back-to-back output
-	// ending with the final stage to print the title of
-	// each web page in the main go routine.
-	for title := range titleGen(rootGen(respGen(urls...))) {
-		a := strings.Contains(title, keyword)
-		if  a == true {
-			database, _ := sql.Open("sqlite3", "./titles.db")
-			statement, _ := database.Prepare("CREATE TABLE IF NOT EXISTS titles (id INTEGER PRIMARY KEY, title TEXT)")
-			statement.Exec()
-			statement, _ = database.Prepare("INSERT INTO titles (title) VALUES (?)")
-			statement.Exec(title)
-			rows, _ := database.Query("SELECT id, title FROM titles")
+	log.SetPriorityString("info")
+	log.SetPrefix("crawler")
 
-			for rows.Next() {
-				rows.Scan(&id, &title)
-				fmt.Println(strconv.Itoa(id) + ": " + title + " ")
-			}
-			statement, _ = database.Prepare("DROP TABLE [IF EXISTS] titles")
-		}
+	log.Debug(os.Args)
+
+	if len(os.Args) < 2 {
+		log.Fatalln("Missing Url arg")
 	}
-	fmt.Println("\nThere are no useful articles for you")
+
+	recurDownloader(os.Args[1], 0)
+	fmt.Println("Today there are no more useful articles for you!")
 }
