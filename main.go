@@ -24,7 +24,7 @@ type HttpError struct {
 	original string
 }
 
-var keyword = "Python"
+var keyword = "PHP"
 var id int
 
 func (l Link) String() string {
@@ -33,21 +33,21 @@ func (l Link) String() string {
 
 	if strings.Contains(l.text,keyword) {
 
-		database, _ := sql.Open("sqlite3", "./article.db")
-		createDB := "CREATE TABLE IF NOT EXISTS article (id INTEGER PRIMARY KEY, url TEXT, text TEXT)"
+		database, _ := sql.Open("sqlite3", "./articles.db")
+		createDB := "CREATE TABLE IF NOT EXISTS articles (id INTEGER PRIMARY KEY, url TEXT, text TEXT)"
 		database.Exec(createDB)
 		tx, _ := database.Begin()
-		statement, _ := database.Prepare("INSERT INTO article (url, text) VALUES (?, ?)")
+		statement, _ := database.Prepare("INSERT INTO articles (url, text) VALUES (?, ?)")
 		statement.Exec(url, text)
 		tx.Commit()
-		rows, _ := database.Query("SELECT id, url, text FROM article")
+		rows, _ := database.Query("SELECT id, url, text FROM articles")
 
 		for rows.Next() {
 			rows.Scan(&id, &text, &url)
 		}
 		fmt.Println(strconv.Itoa(id) + ": " + text + ": " + url + " ")
 	}
-	return fmt.Sprintf("%s%s (%d) - %s", spacer, l.text, l.depth, l.url)
+	return fmt.Sprintf("%s%s (%d) - %s\n", spacer, l.text, l.depth, l.url)
 }
 
 func (l Link) Valid() bool {
