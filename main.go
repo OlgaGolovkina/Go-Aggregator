@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	//"database/sql"
-	//"strconv"
+	"database/sql"
+	"strconv"
 
 	"github.com/yhat/scrape"
 	"golang.org/x/net/html"
@@ -15,7 +15,7 @@ import (
 )
 
 // Set your email here to include in the User-Agent string.
-var email = "youremail@gmail.com"
+//var email = "youremail@gmail.com"
 var urls = []string{
 	//"http://techcrunch.com/",
 	//"https://www.reddit.com/",
@@ -25,7 +25,8 @@ var urls = []string{
 	"https://dou.ua",
 	"http://digg.com",
 }
-var keyword  = "language"
+var keyword  = "Python"
+var id int
 
 func respGen(urls ...string) <-chan *http.Response {
 	var wg sync.WaitGroup
@@ -37,7 +38,7 @@ func respGen(urls ...string) <-chan *http.Response {
 			if err != nil {
 				panic(err)
 			}
-			req.Header.Set("user-agent", "testBot("+email+")")
+			//req.Header.Set("user-agent", "testBot("+email+")")
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				panic(err)
@@ -108,19 +109,21 @@ func main() {
 	// ending with the final stage to print the title of
 	// each web page in the main go routine.
 	for title := range titleGen(rootGen(respGen(urls...))) {
-		fmt.Println("Useful for you: ", title, "--->" ,strings.Contains(title, keyword))
-		//database, _ := sql.Open("sqlite3", "./titles.db")
-		//statement, _ := database.Prepare("CREATE TABLE IF NOT EXISTS titles (id INTEGER PRIMARY KEY, title TEXT)")
-		//statement.Exec()
-		//statement, _ = database.Prepare("INSERT INTO titles (title) VALUES (?)")
-		//statement.Exec(title)
-		//rows, _ := database.Query("SELECT id, title FROM titles")
-		//var id int
-		//
-		//for rows.Next() {
-		//	rows.Scan(&id, &title)
-		//	fmt.Println(strconv.Itoa(id) + ": " + title + " ")
-		//}
-		//statement, _ = database.Prepare("DROP TABLE [IF EXISTS] titles")
+		a := strings.Contains(title, keyword)
+		if  a == true {
+			database, _ := sql.Open("sqlite3", "./titles.db")
+			statement, _ := database.Prepare("CREATE TABLE IF NOT EXISTS titles (id INTEGER PRIMARY KEY, title TEXT)")
+			statement.Exec()
+			statement, _ = database.Prepare("INSERT INTO titles (title) VALUES (?)")
+			statement.Exec(title)
+			rows, _ := database.Query("SELECT id, title FROM titles")
+
+			for rows.Next() {
+				rows.Scan(&id, &title)
+				fmt.Println(strconv.Itoa(id) + ": " + title + " ")
+			}
+			statement, _ = database.Prepare("DROP TABLE [IF EXISTS] titles")
+		}
 	}
+	fmt.Println("\nThere are no useful articles for you")
 }
