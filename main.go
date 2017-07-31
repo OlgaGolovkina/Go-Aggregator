@@ -47,7 +47,7 @@ func (l Link) String() string {
 		}
 		fmt.Println(strconv.Itoa(id) + ": " + text + ": " + url + " ")
 	}
-	return fmt.Sprintf("%s%s (%d) - %s\n", spacer, l.text, l.depth, l.url)
+	return fmt.Sprintf("%sUseful article: '%s' (%d)\nSource - %s\n", spacer, l.text, l.depth, l.url)
 }
 
 func (l Link) Valid() bool {
